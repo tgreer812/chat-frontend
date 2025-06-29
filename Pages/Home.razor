@@ -23,7 +23,7 @@
 
     <main class="chat-main">
         <header class="chat-header">
-            <h1>Chat Room</h1>
+            <h1>Vibe Coded FAPP Hangout</h1>
             <span class="user-count">@users.Count users online</span>
         </header>
 
@@ -32,8 +32,8 @@
             {
                 <div class="message @(IsOwnMessage(chat) ? "own-message" : "")">
                     <div class="message-header">
-                        <span class="message-author">@(chat.User?.Username ?? "Unknown")</span>
-                        <span class="message-time">@chat.Timestamp.ToString("HH:mm")</span>
+                        <span class="message-author">@GetChatUsername(chat)</span>
+                        <span class="message-time">@chat.Timestamp.ToLocalTime().ToString("HH:mm")</span>
                     </div>
                     <div class="message-content">@chat.Contents</div>
                 </div>
@@ -64,9 +64,9 @@
     <div class="username-modal">
         <div class="modal-content">
             <h2>Enter your username</h2>
-            <input type="text" @bind="username" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await CreateUser(); })" 
+            <input type="text" @bind="username" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await CreateOrLoginUser(); })" 
                    placeholder="Username" class="username-input" />
-            <button @onclick="CreateUser" class="username-button" disabled="@(string.IsNullOrWhiteSpace(username) || isCreatingUser)">
+            <button @onclick="CreateOrLoginUser" class="username-button" disabled="@(string.IsNullOrWhiteSpace(username) || isCreatingUser)">
                 @if (isCreatingUser)
                 {
                     <span>Joining...</span>
@@ -149,7 +149,7 @@
         }
     }
 
-    private async Task CreateUser()
+    private async Task CreateOrLoginUser()
     {
         if (string.IsNullOrWhiteSpace(username) || isCreatingUser) return;
 
@@ -158,25 +158,42 @@
         
         try
         {
-            Console.WriteLine($"Attempting to create user: {username}");
-            var user = new User { Username = username.Trim() };
-            currentUser = await ApiService.CreateUserAsync(user);
+            var trimmedUsername = username.Trim();
+            Console.WriteLine($"Attempting to login/create user: {trimmedUsername}");
             
-            if (currentUser != null)
+            // First, check if user already exists
+            var existingUser = users.FirstOrDefault(u => 
+                string.Equals(u.Username, trimmedUsername, StringComparison.OrdinalIgnoreCase));
+            
+            if (existingUser != null)
             {
-                Console.WriteLine($"User created successfully with ID: {currentUser.Id}");
-                await LoadUsers();
+                // User exists, use existing user
+                currentUser = existingUser;
+                Console.WriteLine($"User already exists with ID: {currentUser.Id}, logging in");
             }
             else
             {
-                errorMessage = "Failed to create user. Please try again.";
-                Console.WriteLine("CreateUserAsync returned null");
+                // User doesn't exist, create new user
+                Console.WriteLine("User doesn't exist, creating new user");
+                var user = new User { Username = trimmedUsername };
+                currentUser = await ApiService.CreateUserAsync(user);
+                
+                if (currentUser != null)
+                {
+                    Console.WriteLine($"User created successfully with ID: {currentUser.Id}");
+                    await LoadUsers();
+                }
+                else
+                {
+                    errorMessage = "Failed to create user. Please try again.";
+                    Console.WriteLine("CreateUserAsync returned null");
+                }
             }
         }
         catch (Exception ex)
         {
             errorMessage = $"Error: {ex.Message}";
-            Console.WriteLine($"Error creating user: {ex}");
+            Console.WriteLine($"Error creating/logging in user: {ex}");
         }
         finally
         {
@@ -219,34 +236,23 @@
         return string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpper();
     }
 
-    private bool IsOwnMessage(Chat chat)
+    private string GetChatUsername(Chat chat)
     {
-        return currentUser != null && chat.UserId == currentUser.Id;
-    }
-
-    private async Task ScrollToBottom()
-    {
-        try
+        // First try to get username from the chat object itself
+        if (!string.IsNullOrEmpty(chat.Username))
         {
-            await messagesContainer.FocusAsync();
-            await Task.Delay(50);
+            return chat.Username;
         }
-        catch { }
-    }
-
-    public void Dispose()
-    {
-        refreshTimer?.Dispose();
-    }
-}
+        
+        // Fallback to user object if present
+        if (chat.User != null && !string.IsNullOrEmpty(chat.User.Username))
         {
-            isLoading = false;
+            return chat.User.Username;
         }
-    }
-
-    private string GetInitial(string name)
-    {
-        return string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpper();
+        
+        // Last resort: find user by ID
+        var user = users.FirstOrDefault(u => u.Id == chat.UserId);
+        return user?.Username ?? "Unknown";
     }
 
     private bool IsOwnMessage(Chat chat)

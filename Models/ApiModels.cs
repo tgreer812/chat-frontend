@@ -13,6 +13,7 @@ namespace ChatFrontend.Models
         public string Contents { get; set; } = "";
         public DateTime Timestamp { get; set; }
         public User? User { get; set; }
+        public string? Username { get; set; } // Add this field for the username from the API
     }
 
     public class ChatCreateRequest

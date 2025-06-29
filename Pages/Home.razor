@@ -1,0 +1,354 @@
+﻿@page "/"
+
+<PageTitle>Chat Frontend</PageTitle>
+
+<div class="chat-container">
+    <aside class="users-sidebar">
+        <h2 class="sidebar-title">Active Users</h2>
+        <ul class="users-list">
+            @foreach (var user in activeUsers)
+            {
+                <li class="user-item">
+                    <div class="user-avatar">@user.Name.Substring(0, 1)</div>
+                    <span class="user-name">@user.Name</span>
+                    <span class="user-status @(user.IsOnline ? "online" : "offline")"></span>
+                </li>
+            }
+        </ul>
+    </aside>
+
+    <main class="chat-main">
+        <header class="chat-header">
+            <h1>Chat Room</h1>
+            <span class="user-count">@activeUsers.Count(u => u.IsOnline) users online</span>
+        </header>
+
+        <div class="messages-container">
+            @foreach (var message in messages)
+            {
+                <div class="message @(message.IsOwnMessage ? "own-message" : "")">
+                    <div class="message-header">
+                        <span class="message-author">@message.Author</span>
+                        <span class="message-time">@message.Timestamp.ToString("HH:mm")</span>
+                    </div>
+                    <div class="message-content">@message.Content</div>
+                </div>
+            }
+        </div>
+
+        <div class="message-input-container">
+            <input type="text" @bind="newMessage" @onkeypress="@((e) => { if (e.Key == "Enter") SendMessage(); })" 
+                   class="message-input" placeholder="Type a message..." />
+            <button @onclick="SendMessage" class="send-button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+            </button>
+        </div>
+    </main>
+</div>
+
+<style>
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+
+    :global(html), :global(body) {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    :global(#app), :global(.page), :global(.main), :global(.content) {
+        height: 100vh;
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+    }
+
+    :global(.top-row) {
+        display: none;
+    }
+
+    .chat-container {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        height: 100vh;
+        width: 100vw;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        position: fixed;
+        top: 0;
+        left: 0;
+    }
+
+    .users-sidebar {
+        background-color: #161b22;
+        border-right: 1px solid #30363d;
+        padding: 1.5rem;
+        overflow-y: auto;
+    }
+
+    .sidebar-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+        color: #f0f6fc;
+    }
+
+    .users-list {
+        list-style: none;
+    }
+
+    .user-item {
+        display: flex;
+        align-items: center;
+        padding: 0.75rem;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        transition: background-color 0.2s;
+    }
+
+    .user-item:hover {
+        background-color: #1f242c;
+    }
+
+    .user-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #7928ca, #ff0080);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        margin-right: 0.75rem;
+    }
+
+    .user-name {
+        flex: 1;
+        font-size: 0.95rem;
+    }
+
+    .user-status {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #6e7681;
+    }
+
+    .user-status.online {
+        background-color: #3fb950;
+    }
+
+    .chat-main {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .chat-header {
+        padding: 1.5rem;
+        background-color: #161b22;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .chat-header h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #f0f6fc;
+    }
+
+    .user-count {
+        font-size: 0.875rem;
+        color: #8b949e;
+    }
+
+    .messages-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .message {
+        max-width: 70%;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    .message.own-message {
+        align-self: flex-end;
+    }
+
+    .message-header {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.25rem;
+        font-size: 0.875rem;
+    }
+
+    .message-author {
+        font-weight: 600;
+        color: #58a6ff;
+    }
+
+    .own-message .message-author {
+        color: #a371f7;
+    }
+
+    .message-time {
+        color: #6e7681;
+    }
+
+    .message-content {
+        background-color: #1f242c;
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        line-height: 1.5;
+    }
+
+    .own-message .message-content {
+        background-color: #1f2937;
+    }
+
+    .message-input-container {
+        display: flex;
+        gap: 0.75rem;
+        padding: 1.5rem;
+        background-color: #161b22;
+        border-top: 1px solid #30363d;
+    }
+
+    .message-input {
+        flex: 1;
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        color: #c9d1d9;
+        font-size: 0.95rem;
+        transition: border-color 0.2s;
+    }
+
+    .message-input:focus {
+        outline: none;
+        border-color: #58a6ff;
+    }
+
+    .message-input::placeholder {
+        color: #6e7681;
+    }
+
+    .send-button {
+        background: linear-gradient(135deg, #7928ca, #ff0080);
+        border: none;
+        border-radius: 8px;
+        padding: 0.75rem 1.5rem;
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.2s, opacity 0.2s;
+    }
+
+    .send-button:hover {
+        transform: scale(1.05);
+    }
+
+    .send-button:active {
+        transform: scale(0.95);
+    }
+
+    @@keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #0d1117;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #30363d;
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: #484f58;
+    }
+</style>
+
+@code {
+    private string newMessage = "";
+    
+    private List<User> activeUsers = new List<User>
+    {
+        new User { Name = "Alice Johnson", IsOnline = true },
+        new User { Name = "Bob Smith", IsOnline = true },
+        new User { Name = "Charlie Brown", IsOnline = false },
+        new User { Name = "Diana Prince", IsOnline = true },
+        new User { Name = "Ethan Hunt", IsOnline = true }
+    };
+
+    private List<Message> messages = new List<Message>
+    {
+        new Message { Author = "Alice Johnson", Content = "Hey everyone! How's it going?", Timestamp = DateTime.Now.AddMinutes(-5), IsOwnMessage = false },
+        new Message { Author = "You", Content = "Hi Alice! Doing great, thanks for asking!", Timestamp = DateTime.Now.AddMinutes(-4), IsOwnMessage = true },
+        new Message { Author = "Bob Smith", Content = "Just finished the project presentation. Went really well!", Timestamp = DateTime.Now.AddMinutes(-3), IsOwnMessage = false },
+        new Message { Author = "Diana Prince", Content = "That's awesome Bob! Congrats 🎉", Timestamp = DateTime.Now.AddMinutes(-2), IsOwnMessage = false },
+        new Message { Author = "You", Content = "Great job Bob! I knew you'd nail it.", Timestamp = DateTime.Now.AddMinutes(-1), IsOwnMessage = true }
+    };
+
+    private void SendMessage()
+    {
+        if (!string.IsNullOrWhiteSpace(newMessage))
+        {
+            messages.Add(new Message
+            {
+                Author = "You",
+                Content = newMessage,
+                Timestamp = DateTime.Now,
+                IsOwnMessage = true
+            });
+            
+            newMessage = "";
+            StateHasChanged();
+        }
+    }
+
+    private class User
+    {
+        public string Name { get; set; } = "";
+        public bool IsOnline { get; set; }
+    }
+
+    private class Message
+    {
+        public string Author { get; set; } = "";
+        public string Content { get; set; } = "";
+        public DateTime Timestamp { get; set; }
+        public bool IsOwnMessage { get; set; }
+    }
+}

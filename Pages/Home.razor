@@ -1,4 +1,8 @@
 ﻿@page "/"
+@using ChatFrontend.Services
+@using ChatFrontend.Models
+@inject ChatApiService ApiService
+@implements IDisposable
 
 <PageTitle>Chat Frontend</PageTitle>
 
@@ -6,12 +10,12 @@
     <aside class="users-sidebar">
         <h2 class="sidebar-title">Active Users</h2>
         <ul class="users-list">
-            @foreach (var user in activeUsers)
+            @foreach (var user in users)
             {
                 <li class="user-item">
-                    <div class="user-avatar">@user.Name.Substring(0, 1)</div>
-                    <span class="user-name">@user.Name</span>
-                    <span class="user-status @(user.IsOnline ? "online" : "offline")"></span>
+                    <div class="user-avatar">@GetInitial(user.Username)</div>
+                    <span class="user-name">@user.Username</span>
+                    <span class="user-status online"></span>
                 </li>
             }
         </ul>
@@ -19,336 +23,255 @@
 
     <main class="chat-main">
         <header class="chat-header">
-            <h1>Chat Room</h1>
-            <span class="user-count">@activeUsers.Count(u => u.IsOnline) users online</span>
+            <h1>Vibe Coded FAPP Hangout</h1>
+            <span class="user-count">@users.Count users online</span>
         </header>
 
-        <div class="messages-container">
-            @foreach (var message in messages)
+        <div class="messages-container" @ref="messagesContainer">
+            @foreach (var chat in chats.OrderBy(c => c.Timestamp))
             {
-                <div class="message @(message.IsOwnMessage ? "own-message" : "")">
+                <div class="message @(IsOwnMessage(chat) ? "own-message" : "")">
                     <div class="message-header">
-                        <span class="message-author">@message.Author</span>
-                        <span class="message-time">@message.Timestamp.ToString("HH:mm")</span>
+                        <span class="message-author">@GetChatUsername(chat)</span>
+                        <span class="message-time">@chat.Timestamp.ToLocalTime().ToString("HH:mm")</span>
                     </div>
-                    <div class="message-content">@message.Content</div>
+                    <div class="message-content">@chat.Contents</div>
                 </div>
             }
         </div>
 
         <div class="message-input-container">
-            <input type="text" @bind="newMessage" @onkeypress="@((e) => { if (e.Key == "Enter") SendMessage(); })" 
-                   class="message-input" placeholder="Type a message..." />
-            <button @onclick="SendMessage" class="send-button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                </svg>
+            <input type="text" @bind="newMessage" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await SendMessage(); })" 
+                   class="message-input" placeholder="Type a message..." disabled="@(currentUser == null)" />
+            <button @onclick="SendMessage" class="send-button" disabled="@(currentUser == null || isLoading)">
+                @if (isLoading)
+                {
+                    <span>...</span>
+                }
+                else
+                {
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                }
             </button>
         </div>
     </main>
 </div>
 
-<style>
-    * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-    }
-
-    :global(html), :global(body) {
-        height: 100%;
-        width: 100%;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-    }
-
-    :global(#app), :global(.page), :global(.main), :global(.content) {
-        height: 100vh;
-        width: 100vw;
-        margin: 0;
-        padding: 0;
-    }
-
-    :global(.top-row) {
-        display: none;
-    }
-
-    .chat-container {
-        display: grid;
-        grid-template-columns: 280px 1fr;
-        height: 100vh;
-        width: 100vw;
-        background-color: #0d1117;
-        color: #c9d1d9;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        position: fixed;
-        top: 0;
-        left: 0;
-    }
-
-    .users-sidebar {
-        background-color: #161b22;
-        border-right: 1px solid #30363d;
-        padding: 1.5rem;
-        overflow-y: auto;
-    }
-
-    .sidebar-title {
-        font-size: 1.2rem;
-        font-weight: 600;
-        margin-bottom: 1.5rem;
-        color: #f0f6fc;
-    }
-
-    .users-list {
-        list-style: none;
-    }
-
-    .user-item {
-        display: flex;
-        align-items: center;
-        padding: 0.75rem;
-        border-radius: 8px;
-        margin-bottom: 0.5rem;
-        transition: background-color 0.2s;
-    }
-
-    .user-item:hover {
-        background-color: #1f242c;
-    }
-
-    .user-avatar {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #7928ca, #ff0080);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 600;
-        margin-right: 0.75rem;
-    }
-
-    .user-name {
-        flex: 1;
-        font-size: 0.95rem;
-    }
-
-    .user-status {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background-color: #6e7681;
-    }
-
-    .user-status.online {
-        background-color: #3fb950;
-    }
-
-    .chat-main {
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
-
-    .chat-header {
-        padding: 1.5rem;
-        background-color: #161b22;
-        border-bottom: 1px solid #30363d;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .chat-header h1 {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #f0f6fc;
-    }
-
-    .user-count {
-        font-size: 0.875rem;
-        color: #8b949e;
-    }
-
-    .messages-container {
-        flex: 1;
-        overflow-y: auto;
-        padding: 1.5rem;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-
-    .message {
-        max-width: 70%;
-        animation: fadeIn 0.3s ease-in;
-    }
-
-    .message.own-message {
-        align-self: flex-end;
-    }
-
-    .message-header {
-        display: flex;
-        gap: 0.5rem;
-        margin-bottom: 0.25rem;
-        font-size: 0.875rem;
-    }
-
-    .message-author {
-        font-weight: 600;
-        color: #58a6ff;
-    }
-
-    .own-message .message-author {
-        color: #a371f7;
-    }
-
-    .message-time {
-        color: #6e7681;
-    }
-
-    .message-content {
-        background-color: #1f242c;
-        padding: 0.75rem 1rem;
-        border-radius: 12px;
-        line-height: 1.5;
-    }
-
-    .own-message .message-content {
-        background-color: #1f2937;
-    }
-
-    .message-input-container {
-        display: flex;
-        gap: 0.75rem;
-        padding: 1.5rem;
-        background-color: #161b22;
-        border-top: 1px solid #30363d;
-    }
-
-    .message-input {
-        flex: 1;
-        background-color: #0d1117;
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        color: #c9d1d9;
-        font-size: 0.95rem;
-        transition: border-color 0.2s;
-    }
-
-    .message-input:focus {
-        outline: none;
-        border-color: #58a6ff;
-    }
-
-    .message-input::placeholder {
-        color: #6e7681;
-    }
-
-    .send-button {
-        background: linear-gradient(135deg, #7928ca, #ff0080);
-        border: none;
-        border-radius: 8px;
-        padding: 0.75rem 1.5rem;
-        color: white;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: transform 0.2s, opacity 0.2s;
-    }
-
-    .send-button:hover {
-        transform: scale(1.05);
-    }
-
-    .send-button:active {
-        transform: scale(0.95);
-    }
-
-    @@keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(10px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    /* Scrollbar styling */
-    ::-webkit-scrollbar {
-        width: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: #0d1117;
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: #30363d;
-        border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-        background: #484f58;
-    }
-</style>
+@if (currentUser == null)
+{
+    <div class="username-modal">
+        <div class="modal-content">
+            <h2>Enter your username</h2>
+            <input type="text" @bind="username" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await CreateOrLoginUser(); })" 
+                   placeholder="Username" class="username-input" />
+            <button @onclick="CreateOrLoginUser" class="username-button" disabled="@(string.IsNullOrWhiteSpace(username) || isCreatingUser)">
+                @if (isCreatingUser)
+                {
+                    <span>Joining...</span>
+                }
+                else
+                {
+                    <span>Join Chat</span>
+                }
+            </button>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="error-message">@errorMessage</div>
+            }
+        </div>
+    </div>
+}
 
 @code {
+    private List<User> users = new();
+    private List<Chat> chats = new();
     private string newMessage = "";
-    
-    private List<User> activeUsers = new List<User>
-    {
-        new User { Name = "Alice Johnson", IsOnline = true },
-        new User { Name = "Bob Smith", IsOnline = true },
-        new User { Name = "Charlie Brown", IsOnline = false },
-        new User { Name = "Diana Prince", IsOnline = true },
-        new User { Name = "Ethan Hunt", IsOnline = true }
-    };
+    private string username = "";
+    private User? currentUser;
+    private bool isLoading = false;
+    private bool isCreatingUser = false;
+    private string errorMessage = "";
+    private Timer? refreshTimer;
+    private ElementReference messagesContainer;
 
-    private List<Message> messages = new List<Message>
+    protected override async Task OnInitializedAsync()
     {
-        new Message { Author = "Alice Johnson", Content = "Hey everyone! How's it going?", Timestamp = DateTime.Now.AddMinutes(-5), IsOwnMessage = false },
-        new Message { Author = "You", Content = "Hi Alice! Doing great, thanks for asking!", Timestamp = DateTime.Now.AddMinutes(-4), IsOwnMessage = true },
-        new Message { Author = "Bob Smith", Content = "Just finished the project presentation. Went really well!", Timestamp = DateTime.Now.AddMinutes(-3), IsOwnMessage = false },
-        new Message { Author = "Diana Prince", Content = "That's awesome Bob! Congrats 🎉", Timestamp = DateTime.Now.AddMinutes(-2), IsOwnMessage = false },
-        new Message { Author = "You", Content = "Great job Bob! I knew you'd nail it.", Timestamp = DateTime.Now.AddMinutes(-1), IsOwnMessage = true }
-    };
+        await LoadUsers();
+        await LoadChats();
+        
+        // Set up periodic refresh
+        refreshTimer = new Timer(async _ => await RefreshData(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
 
-    private void SendMessage()
+    private async Task RefreshData()
     {
-        if (!string.IsNullOrWhiteSpace(newMessage))
+        await InvokeAsync(async () =>
         {
-            messages.Add(new Message
-            {
-                Author = "You",
-                Content = newMessage,
-                Timestamp = DateTime.Now,
-                IsOwnMessage = true
-            });
-            
-            newMessage = "";
+            await LoadUsers();
+            await LoadChats();
             StateHasChanged();
+        });
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            users = await ApiService.GetUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
         }
     }
 
-    private class User
+    private async Task LoadChats()
     {
-        public string Name { get; set; } = "";
-        public bool IsOnline { get; set; }
+        try
+        {
+            var newChats = await ApiService.GetChatsAsync();
+            if (newChats.Count != chats.Count)
+            {
+                chats = newChats;
+                // Scroll to bottom when new messages arrive
+                await InvokeAsync(async () =>
+                {
+                    await Task.Delay(50); // Small delay to ensure DOM is updated
+                    await ScrollToBottom();
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading chats: {ex.Message}");
+        }
     }
 
-    private class Message
+    private async Task CreateOrLoginUser()
     {
-        public string Author { get; set; } = "";
-        public string Content { get; set; } = "";
-        public DateTime Timestamp { get; set; }
-        public bool IsOwnMessage { get; set; }
+        if (string.IsNullOrWhiteSpace(username) || isCreatingUser) return;
+
+        isCreatingUser = true;
+        errorMessage = "";
+        
+        try
+        {
+            var trimmedUsername = username.Trim();
+            Console.WriteLine($"Attempting to login/create user: {trimmedUsername}");
+            
+            // First, check if user already exists
+            var existingUser = users.FirstOrDefault(u => 
+                string.Equals(u.Username, trimmedUsername, StringComparison.OrdinalIgnoreCase));
+            
+            if (existingUser != null)
+            {
+                // User exists, use existing user
+                currentUser = existingUser;
+                Console.WriteLine($"User already exists with ID: {currentUser.Id}, logging in");
+            }
+            else
+            {
+                // User doesn't exist, create new user
+                Console.WriteLine("User doesn't exist, creating new user");
+                var user = new User { Username = trimmedUsername };
+                currentUser = await ApiService.CreateUserAsync(user);
+                
+                if (currentUser != null)
+                {
+                    Console.WriteLine($"User created successfully with ID: {currentUser.Id}");
+                    await LoadUsers();
+                }
+                else
+                {
+                    errorMessage = "Failed to create user. Please try again.";
+                    Console.WriteLine("CreateUserAsync returned null");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+            Console.WriteLine($"Error creating/logging in user: {ex}");
+        }
+        finally
+        {
+            isCreatingUser = false;
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(newMessage) || currentUser == null || isLoading) return;
+
+        isLoading = true;
+        try
+        {
+            var request = new ChatCreateRequest
+            {
+                UserId = currentUser.Id,
+                Contents = newMessage.Trim()
+            };
+
+            var chat = await ApiService.CreateChatAsync(request);
+            if (chat != null)
+            {
+                newMessage = "";
+                await LoadChats();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error sending message: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetInitial(string name)
+    {
+        return string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpper();
+    }
+
+    private string GetChatUsername(Chat chat)
+    {
+        // First try to get username from the chat object itself
+        if (!string.IsNullOrEmpty(chat.Username))
+        {
+            return chat.Username;
+        }
+        
+        // Fallback to user object if present
+        if (chat.User != null && !string.IsNullOrEmpty(chat.User.Username))
+        {
+            return chat.User.Username;
+        }
+        
+        // Last resort: find user by ID
+        var user = users.FirstOrDefault(u => u.Id == chat.UserId);
+        return user?.Username ?? "Unknown";
+    }
+
+    private bool IsOwnMessage(Chat chat)
+    {
+        return currentUser != null && chat.UserId == currentUser.Id;
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await messagesContainer.FocusAsync();
+            await Task.Delay(50);
+        }
+        catch { }
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
     }
 }

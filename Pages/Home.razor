@@ -1,4 +1,8 @@
 ﻿@page "/"
+@using ChatFrontend.Services
+@using ChatFrontend.Models
+@inject ChatApiService ApiService
+@implements IDisposable
 
 <PageTitle>Chat Frontend</PageTitle>
 
@@ -6,12 +10,12 @@
     <aside class="users-sidebar">
         <h2 class="sidebar-title">Active Users</h2>
         <ul class="users-list">
-            @foreach (var user in activeUsers)
+            @foreach (var user in users)
             {
                 <li class="user-item">
-                    <div class="user-avatar">@user.Name.Substring(0, 1)</div>
-                    <span class="user-name">@user.Name</span>
-                    <span class="user-status @(user.IsOnline ? "online" : "offline")"></span>
+                    <div class="user-avatar">@GetInitial(user.Username)</div>
+                    <span class="user-name">@user.Username</span>
+                    <span class="user-status online"></span>
                 </li>
             }
         </ul>
@@ -20,83 +24,248 @@
     <main class="chat-main">
         <header class="chat-header">
             <h1>Chat Room</h1>
-            <span class="user-count">@activeUsers.Count(u => u.IsOnline) users online</span>
+            <span class="user-count">@users.Count users online</span>
         </header>
 
-        <div class="messages-container">
-            @foreach (var message in messages)
+        <div class="messages-container" @ref="messagesContainer">
+            @foreach (var chat in chats.OrderBy(c => c.Timestamp))
             {
-                <div class="message @(message.IsOwnMessage ? "own-message" : "")">
+                <div class="message @(IsOwnMessage(chat) ? "own-message" : "")">
                     <div class="message-header">
-                        <span class="message-author">@message.Author</span>
-                        <span class="message-time">@message.Timestamp.ToString("HH:mm")</span>
+                        <span class="message-author">@(chat.User?.Username ?? "Unknown")</span>
+                        <span class="message-time">@chat.Timestamp.ToString("HH:mm")</span>
                     </div>
-                    <div class="message-content">@message.Content</div>
+                    <div class="message-content">@chat.Contents</div>
                 </div>
             }
         </div>
 
         <div class="message-input-container">
-            <input type="text" @bind="newMessage" @onkeypress="@((e) => { if (e.Key == "Enter") SendMessage(); })" 
-                   class="message-input" placeholder="Type a message..." />
-            <button @onclick="SendMessage" class="send-button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                </svg>
+            <input type="text" @bind="newMessage" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await SendMessage(); })" 
+                   class="message-input" placeholder="Type a message..." disabled="@(currentUser == null)" />
+            <button @onclick="SendMessage" class="send-button" disabled="@(currentUser == null || isLoading)">
+                @if (isLoading)
+                {
+                    <span>...</span>
+                }
+                else
+                {
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                }
             </button>
         </div>
     </main>
 </div>
 
-@code {
-    private string newMessage = "";
-    
-    private List<User> activeUsers = new List<User>
-    {
-        new User { Name = "Alice Johnson", IsOnline = true },
-        new User { Name = "Bob Smith", IsOnline = true },
-        new User { Name = "Charlie Brown", IsOnline = false },
-        new User { Name = "Diana Prince", IsOnline = true },
-        new User { Name = "Ethan Hunt", IsOnline = true }
-    };
-
-    private List<Message> messages = new List<Message>
-    {
-        new Message { Author = "Alice Johnson", Content = "Hey everyone! How's it going?", Timestamp = DateTime.Now.AddMinutes(-5), IsOwnMessage = false },
-        new Message { Author = "You", Content = "Hi Alice! Doing great, thanks for asking!", Timestamp = DateTime.Now.AddMinutes(-4), IsOwnMessage = true },
-        new Message { Author = "Bob Smith", Content = "Just finished the project presentation. Went really well!", Timestamp = DateTime.Now.AddMinutes(-3), IsOwnMessage = false },
-        new Message { Author = "Diana Prince", Content = "That's awesome Bob! Congrats 🎉", Timestamp = DateTime.Now.AddMinutes(-2), IsOwnMessage = false },
-        new Message { Author = "You", Content = "Great job Bob! I knew you'd nail it.", Timestamp = DateTime.Now.AddMinutes(-1), IsOwnMessage = true }
-    };
-
-    private void SendMessage()
-    {
-        if (!string.IsNullOrWhiteSpace(newMessage))
-        {
-            messages.Add(new Message
+@if (currentUser == null)
+{
+    <div class="username-modal">
+        <div class="modal-content">
+            <h2>Enter your username</h2>
+            <input type="text" @bind="username" @bind:event="oninput" @onkeypress="@(async (e) => { if (e.Key == "Enter") await CreateUser(); })" 
+                   placeholder="Username" class="username-input" />
+            <button @onclick="CreateUser" class="username-button" disabled="@(string.IsNullOrWhiteSpace(username) || isCreatingUser)">
+                @if (isCreatingUser)
+                {
+                    <span>Joining...</span>
+                }
+                else
+                {
+                    <span>Join Chat</span>
+                }
+            </button>
+            @if (!string.IsNullOrEmpty(errorMessage))
             {
-                Author = "You",
-                Content = newMessage,
-                Timestamp = DateTime.Now,
-                IsOwnMessage = true
-            });
-            
-            newMessage = "";
+                <div class="error-message">@errorMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<User> users = new();
+    private List<Chat> chats = new();
+    private string newMessage = "";
+    private string username = "";
+    private User? currentUser;
+    private bool isLoading = false;
+    private bool isCreatingUser = false;
+    private string errorMessage = "";
+    private Timer? refreshTimer;
+    private ElementReference messagesContainer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+        await LoadChats();
+        
+        // Set up periodic refresh
+        refreshTimer = new Timer(async _ => await RefreshData(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private async Task RefreshData()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadUsers();
+            await LoadChats();
             StateHasChanged();
+        });
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            users = await ApiService.GetUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
         }
     }
 
-    private class User
+    private async Task LoadChats()
     {
-        public string Name { get; set; } = "";
-        public bool IsOnline { get; set; }
+        try
+        {
+            var newChats = await ApiService.GetChatsAsync();
+            if (newChats.Count != chats.Count)
+            {
+                chats = newChats;
+                // Scroll to bottom when new messages arrive
+                await InvokeAsync(async () =>
+                {
+                    await Task.Delay(50); // Small delay to ensure DOM is updated
+                    await ScrollToBottom();
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading chats: {ex.Message}");
+        }
     }
 
-    private class Message
+    private async Task CreateUser()
     {
-        public string Author { get; set; } = "";
-        public string Content { get; set; } = "";
-        public DateTime Timestamp { get; set; }
-        public bool IsOwnMessage { get; set; }
+        if (string.IsNullOrWhiteSpace(username) || isCreatingUser) return;
+
+        isCreatingUser = true;
+        errorMessage = "";
+        
+        try
+        {
+            Console.WriteLine($"Attempting to create user: {username}");
+            var user = new User { Username = username.Trim() };
+            currentUser = await ApiService.CreateUserAsync(user);
+            
+            if (currentUser != null)
+            {
+                Console.WriteLine($"User created successfully with ID: {currentUser.Id}");
+                await LoadUsers();
+            }
+            else
+            {
+                errorMessage = "Failed to create user. Please try again.";
+                Console.WriteLine("CreateUserAsync returned null");
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+            Console.WriteLine($"Error creating user: {ex}");
+        }
+        finally
+        {
+            isCreatingUser = false;
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(newMessage) || currentUser == null || isLoading) return;
+
+        isLoading = true;
+        try
+        {
+            var request = new ChatCreateRequest
+            {
+                UserId = currentUser.Id,
+                Contents = newMessage.Trim()
+            };
+
+            var chat = await ApiService.CreateChatAsync(request);
+            if (chat != null)
+            {
+                newMessage = "";
+                await LoadChats();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error sending message: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetInitial(string name)
+    {
+        return string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpper();
+    }
+
+    private bool IsOwnMessage(Chat chat)
+    {
+        return currentUser != null && chat.UserId == currentUser.Id;
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await messagesContainer.FocusAsync();
+            await Task.Delay(50);
+        }
+        catch { }
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
+    }
+}
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetInitial(string name)
+    {
+        return string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpper();
+    }
+
+    private bool IsOwnMessage(Chat chat)
+    {
+        return currentUser != null && chat.UserId == currentUser.Id;
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await messagesContainer.FocusAsync();
+            await Task.Delay(50);
+        }
+        catch { }
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
     }
 }
